@@ -11,7 +11,15 @@
 
 using namespace std;
 
-vector<SOCKET> Users_Connected;
+
+struct UserInfo {
+	int id;
+	SOCKET socket;
+};
+
+vector<UserInfo> Users_Connected;
+
+
 
 mutex mtx;
 int counter = 0;
@@ -36,7 +44,7 @@ void send(SOCKET client, string msg) {
 
 bool RecvPassword(SOCKET client) {
 	const int maxAttempts = 4;
-	
+
 	stringstream ss;
 	ss << this_thread::get_id();
 	int id;
@@ -64,6 +72,25 @@ bool RecvPassword(SOCKET client) {
 	return false;
 }
 
+void KickUser(int id) {
+	mtx.lock();
+	for (auto it = Users_Connected.begin(); it != Users_Connected.end(); ++it) {
+		if (it->id == id) {
+			send(it->socket, "You have been kicked from the server.");
+			closesocket(it->socket);
+			Users_Connected.erase(it);
+			counter--;
+			cout << "User with id " << id << " has been kicked." << endl;
+
+			mtx.unlock();
+			return;
+		}
+	}
+	mtx.unlock();
+	cout << "User with id " << id << " not found." << endl;
+}
+
+
 void ClientHandler(SOCKET clientsocket) {
 
 	stringstream ss;
@@ -81,19 +108,19 @@ void ClientHandler(SOCKET clientsocket) {
 	cout << "User " << id_client << " successfully authenticated." << endl;
 
 	mtx.lock();
-	Users_Connected.push_back(clientsocket);
+	Users_Connected.push_back({ id, clientsocket });
 	counter++;
 	mtx.unlock();
 
-
 	while (true) {
+
 		int msg_size = 0;
 		int result = recv(clientsocket, (char*)&msg_size, sizeof(int), NULL);//принятие размера сообщения
 		if (result <= 0) {
 			cout << "User " << id_client << " disconected or error." << endl;
 			mtx.lock();
 			for (auto it = Users_Connected.begin(); it != Users_Connected.end(); ++it) {
-				if (*it == clientsocket) {
+				if (it->socket == clientsocket) {
 					Users_Connected.erase(it);
 					break;
 				}
@@ -105,12 +132,12 @@ void ClientHandler(SOCKET clientsocket) {
 		}
 		char* msg = new char[msg_size + 1];//выделение памяти под сообщение
 		msg[msg_size] = '\0';// для конца строки
-		result = recv(clientsocket, msg, msg_size, NULL);//Принятие самого сообщения ///////Точка ошибки
+		result = recv(clientsocket, msg, msg_size, NULL);//Принятие самого сообщения 
 		if (result <= 0) {
 			cout << "User " << id_client << " disconected or error." << endl;
 			mtx.lock();
 			for (auto it = Users_Connected.begin(); it != Users_Connected.end(); ++it) {
-				if (*it == clientsocket) {
+				if (it->socket == clientsocket) {
 					Users_Connected.erase(it);
 					break;
 				}
@@ -122,12 +149,12 @@ void ClientHandler(SOCKET clientsocket) {
 			break;
 		}
 		mtx.lock();
-		for (SOCKET other_client : Users_Connected) {
-			if (other_client == clientsocket) continue;
-			if (other_client == INVALID_SOCKET) continue;
-			send(other_client, id_client + ":");
-			send(other_client, (char*)&msg_size, sizeof(int), NULL);//отправка размера сообщения
-			send(other_client, msg, msg_size, NULL);//отправка сообщения
+		for (const auto& user : Users_Connected) {
+			if (user.socket == clientsocket) continue;
+			if (user.socket == INVALID_SOCKET) continue;
+			send(user.socket, id_client + ":");
+			send(user.socket, (char*)&msg_size, sizeof(int), NULL);//отправка размера сообщения
+			send(user.socket, msg, msg_size, NULL);//отправка сообщения
 		}
 		mtx.unlock();
 		delete[] msg;
@@ -151,32 +178,50 @@ int main() {
 	SOCKADDR_IN addr;
 	int size_of_len = sizeof(addr);
 	addr.sin_addr.s_addr = inet_addr("127.0.0.1");
-	addr.sin_port = htons(7777);
+	addr.sin_port = htons(4444);
 	addr.sin_family = AF_INET;
 
 	SOCKET slisten = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
 	if (bind(slisten, (SOCKADDR*)&addr, sizeof(addr)) == SOCKET_ERROR)
-		cout<< "Bind ERROR."<<endl;
+		cout << "Bind ERROR." << endl;
 	if (listen(slisten, SOMAXCONN) == SOCKET_ERROR)
 		cout << "Listen ERROR." << endl;
 	cout << "Server start listen client..." << endl;
 
+
+
+
 	SOCKET newconnection;
 	vector<thread> client_threads;
-	
+
+	thread([]() {
+		string command;
+		while (true) {
+			getline(cin, command);
+			if (command.find("/kick") == 0) {
+				stringstream ss(command);
+				string cmd;
+				int id;
+				ss >> cmd >> id;
+				KickUser(id);
+			}
+			else {
+				cout << "Unknown command. Use /kick <id> to kick a user." << endl;
+			}
+		}
+		}).detach();
+
 	while (true) {
 		newconnection = accept(slisten, (SOCKADDR*)&addr, &size_of_len);
-		
-		
-		
 
 		if (newconnection == INVALID_SOCKET)
 			cout << "User is not connected." << endl;
 		else {
 			cout << "New User attempting to connect." << endl;
-		
+
 			client_threads.emplace_back(ClientHandler, newconnection);
 			client_threads.back().detach();
+
 		}
 	}
 
