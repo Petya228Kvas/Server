@@ -11,15 +11,12 @@
 
 using namespace std;
 
-
 struct UserInfo {
 	int id;
 	SOCKET socket;
 };
 
 vector<UserInfo> Users_Connected;
-
-
 
 mutex mtx;
 int counter = 0;
@@ -162,9 +159,6 @@ void ClientHandler(SOCKET clientsocket) {
 }
 
 
-
-
-
 int main() {
 
 	WSAData wsadata;
@@ -187,8 +181,6 @@ int main() {
 	if (listen(slisten, SOMAXCONN) == SOCKET_ERROR)
 		cout << "Listen ERROR." << endl;
 	cout << "Server start listen client..." << endl;
-
-
 
 
 	SOCKET newconnection;
