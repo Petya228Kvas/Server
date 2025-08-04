@@ -70,32 +70,32 @@ int counter = 0;   // Счётчик подключённых пользоват
 // Функция для получения строки от клиента (сначала размер, потом само сообщение)
 vector<uint64_t> recv(SOCKET client) {
 	int enc_msg_size_recv = 0;
-	recv(client, (char*)&enc_msg_size_recv, sizeof(int), NULL);
+	recv(client, (char*)&enc_msg_size_recv, sizeof(int), NULL);// получение размера сообщения
 	if (enc_msg_size_recv <= 0) {
 		return {}; // Возвращаем пустой вектор в случае ошибки или пустого сообщения
 	}
-	vector<uint64_t> enc_msg(enc_msg_size_recv);
-	recv(client, reinterpret_cast<char*>(enc_msg.data()), enc_msg_size_recv * sizeof(uint64_t), NULL);
-	return enc_msg;
+	vector<uint64_t> enc_msg(enc_msg_size_recv);//устанавливаем ветор с размером полученного сообщения
+	recv(client, reinterpret_cast<char*>(enc_msg.data()), enc_msg_size_recv * sizeof(uint64_t), NULL);// принятие самого сообщения
+	return enc_msg; //возвращение вектора сообщения зашифрованного
 }
 
 // Функция для отправки строки клиенту (сначала размер, потом само сообщение)
 void send(SOCKET client, const vector<uint64_t>& enc_msg) {
-	size_t enc_msg_size_send = enc_msg.size();
-	send(client, (char*)&enc_msg_size_send, sizeof(int), NULL);
+	size_t enc_msg_size_send = enc_msg.size();// размер сообщения
+	send(client, (char*)&enc_msg_size_send, sizeof(int), NULL);//отправка размера
 	if (enc_msg_size_send > 0) {
-		send(client, reinterpret_cast<const char*>(enc_msg.data()), enc_msg_size_send * sizeof(uint64_t), NULL);
+		send(client, reinterpret_cast<const char*>(enc_msg.data()), enc_msg_size_send * sizeof(uint64_t), NULL);//отправка сообщения
 	}
 }
 
 string recv_string(SOCKET client) {
-	auto enc_data = recv(client);
+	auto enc_data = recv(client);//получение ветора сообщения
 	if (enc_data.empty()) return "";
-	return Decrypting_Message(enc_data);
+	return Decrypting_Message(enc_data); // дешифруем его
 }
 void send_string(SOCKET client, const string& msg) {
-	auto enc_data = Encrypting_Message(msg);
-	send(client, enc_data);
+	auto enc_data = Encrypting_Message(msg);//шифруем сообщение
+	send(client, enc_data);//отправляем его
 }
 
 // Функция аутентификации пользователя по паролю
@@ -284,11 +284,11 @@ static vector<uint64_t> Encrypting_Message(string msg) {
 	sum = (sum == 0) ? 1 : sum;
 
 
-	encrypt_msg.push_back(power(static_cast<uint64_t>(sum), e, n));
+	encrypt_msg.push_back(power(static_cast<uint64_t>(sum), e, n));//добавление в вектор количество пробелов
 	for (unsigned char c : msg) {
-		encrypt_msg.push_back(encrypt(c, sum));
+		encrypt_msg.push_back(encrypt(c, sum));//добавление самого зашифрованного сообщения
 	}
-	return encrypt_msg;
+	return encrypt_msg; //возвращение ветктора
 }
 
 static string Decrypting_Message(const vector<uint64_t>& enc_msg) {
@@ -296,11 +296,11 @@ static string Decrypting_Message(const vector<uint64_t>& enc_msg) {
 	if (enc_msg.size() < 1) {
 		return "";
 	}
-	uint64_t val = power(enc_msg[0], d, n);
+	uint64_t val = power(enc_msg[0], d, n);//определение числа(количества пробелов)
 	int offset = static_cast<int>(val);
 
 	for (size_t i = 1; i < enc_msg.size(); ++i) {
-		dec_msg += static_cast<char>(decrypt(enc_msg[i], offset));
+		dec_msg += static_cast<char>(decrypt(enc_msg[i], offset));//дешифровка сообщения
 	}
 	return dec_msg;
 }
