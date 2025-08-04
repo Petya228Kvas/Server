@@ -11,6 +11,50 @@
 
 using namespace std;
 
+const uint64_t p = 3557;
+const uint64_t q = 2579;
+const uint64_t n = p * q; //Public key modulus
+
+const uint64_t phi = (p - 1) * (q - 1);
+const uint64_t e = 17; // Public exponent
+static uint64_t modInverse(uint64_t a, uint64_t m) {
+	uint64_t m0 = m;
+	uint64_t y = 0, x = 1;
+	if (m == 1) return 0;
+	while (a > 1) {
+		uint64_t q = a / m;
+		uint64_t t = m;
+		m = a % m, a = t;
+		t = y;
+		y = x - q * y;
+		x = t;
+	}
+	if (x < 0) x += m0;
+	return x;
+}
+const uint64_t d = modInverse(e, phi);
+
+static void index(int i) { cout << i << endl; }
+
+static uint64_t power(uint64_t base, uint64_t exponent, uint64_t modulus) {
+	if (modulus == 1) return 0;
+	uint64_t result = 1;
+	base = base % modulus;
+	while (exponent > 0) {
+		if (exponent & 1)
+			result = (result * base) % modulus;
+		base = (base * base) % modulus;
+		exponent >>= 1;
+	}
+	return result;
+}
+
+static vector<uint64_t> Encrypting_Message(string msg);
+static string Decrypting_Message(const vector<uint64_t>& enc_msg);
+static char decrypt(uint64_t x, int volume);
+static uint64_t encrypt(unsigned char x, int volume);
+
+
 // Структура для хранения информации о подключённом пользователе
 struct UserInfo {
 	int id;         // Уникальный идентификатор пользователя (id потока)
@@ -24,22 +68,34 @@ mutex mtx;         // Мьютекс для синхронизации дост�
 int counter = 0;   // Счётчик подключённых пользователей
 
 // Функция для получения строки от клиента (сначала размер, потом само сообщение)
-string recv(SOCKET client) {
-	int msg_size_recv = 0;
-	recv(client, (char*)&msg_size_recv, sizeof(int), NULL);
-	char* msg_recv = new char[msg_size_recv + 1];
-	recv(client, msg_recv, msg_size_recv, NULL);
-	msg_recv[msg_size_recv] = '\0';
-	string receivedPassword(msg_recv);
-	delete[] msg_recv;
-	return receivedPassword;
+vector<uint64_t> recv(SOCKET client) {
+	int enc_msg_size_recv = 0;
+	recv(client, (char*)&enc_msg_size_recv, sizeof(int), NULL);
+	if (enc_msg_size_recv <= 0) {
+		return {}; // Возвращаем пустой вектор в случае ошибки или пустого сообщения
+	}
+	vector<uint64_t> enc_msg(enc_msg_size_recv);
+	recv(client, reinterpret_cast<char*>(enc_msg.data()), enc_msg_size_recv * sizeof(uint64_t), NULL);
+	return enc_msg;
 }
 
 // Функция для отправки строки клиенту (сначала размер, потом само сообщение)
-void send(SOCKET client, string msg) {
-	size_t msg_size_send = msg.size();
-	send(client, (char*)&msg_size_send, sizeof(int), NULL);
-	send(client, msg.c_str(), msg_size_send, NULL);
+void send(SOCKET client, const vector<uint64_t>& enc_msg) {
+	size_t enc_msg_size_send = enc_msg.size();
+	send(client, (char*)&enc_msg_size_send, sizeof(int), NULL);
+	if (enc_msg_size_send > 0) {
+		send(client, reinterpret_cast<const char*>(enc_msg.data()), enc_msg_size_send * sizeof(uint64_t), NULL);
+	}
+}
+
+string recv_string(SOCKET client) {
+	auto enc_data = recv(client);
+	if (enc_data.empty()) return "";
+	return Decrypting_Message(enc_data);
+}
+void send_string(SOCKET client, const string& msg) {
+	auto enc_data = Encrypting_Message(msg);
+	send(client, enc_data);
 }
 
 // Функция аутентификации пользователя по паролю
@@ -55,22 +111,22 @@ bool RecvPassword(SOCKET client) {
 
 	// Приветственное сообщение и запрос пароля
 	string msg = "Hello, to enter the chat enter the password: ";
-	send(client, msg);
+	send_string(client, msg);
 	for (int current = 1; current != maxAttempts; ++current) {
-		if (recv(client) == "ban") {
-			send(client, "Password true! You have access to chat.");
-			send(client, "You have been assigned an id: " + id_client);
+		if (recv_string(client) == "ban") {
+			send_string(client, "Password true! You have access to chat.");
+			send_string(client, "You have been assigned an id: " + id_client);
 			return true;
 		}
 		else {
 			if (current <= maxAttempts) {
 				int attempt_left = maxAttempts - current;
 				string msg_attempt = to_string(attempt_left) + " attempt(s) left. Try again: ";
-				send(client, msg_attempt);
+				send_string(client, msg_attempt);
 			}
 		}
 	}
-	send(client, "All attempts are wasted.");
+	send_string(client, "All attempts are wasted.");
 	return false;
 }
 
@@ -79,7 +135,7 @@ void KickUser(int id) {
 	mtx.lock();
 	for (auto it = Users_Connected.begin(); it != Users_Connected.end(); ++it) {
 		if (it->id == id) {
-			send(it->socket, "You have been kicked from the server.");
+			send_string(it->socket, "You have been kicked from the server.");
 			closesocket(it->socket);
 			Users_Connected.erase(it);
 			counter--;
@@ -118,9 +174,8 @@ void ClientHandler(SOCKET clientsocket) {
 
 	// Основной цикл приёма и рассылки сообщений
 	while (true) {
-		int msg_size = 0;
-		int result = recv(clientsocket, (char*)&msg_size, sizeof(int), NULL); // Приём размера сообщения
-		if (result <= 0) {
+		vector<uint64_t> enc_msg_vec = recv(clientsocket);
+		if (enc_msg_vec.empty()) {
 			cout << "User " << id_client << " disconected or error." << endl;
 			mtx.lock();
 			for (auto it = Users_Connected.begin(); it != Users_Connected.end(); ++it) {
@@ -134,35 +189,19 @@ void ClientHandler(SOCKET clientsocket) {
 			closesocket(clientsocket);
 			break;
 		}
-		char* msg = new char[msg_size + 1]; // Выделение памяти под сообщение
-		msg[msg_size] = '\0'; // Для конца строки
-		result = recv(clientsocket, msg, msg_size, NULL); // Приём самого сообщения 
-		if (result <= 0) {
-			cout << "User " << id_client << " disconected or error." << endl;
-			mtx.lock();
-			for (auto it = Users_Connected.begin(); it != Users_Connected.end(); ++it) {
-				if (it->socket == clientsocket) {
-					Users_Connected.erase(it);
-					break;
-				}
-			}
-			counter--;
-			mtx.unlock();
-			closesocket(clientsocket);
-			delete[] msg;
-			break;
-		}
-		// Рассылка сообщения всем остальным пользователям
+		string dec_msg = Decrypting_Message(enc_msg_vec);
+		cout << "User " << id_client << ": " << dec_msg << endl;
+		string full_msg_to_send = id_client + " " + dec_msg;
+		vector<uint64_t> enc_msg_for_others = Encrypting_Message(full_msg_to_send);
+
 		mtx.lock();
 		for (const auto& user : Users_Connected) {
-			if (user.socket == clientsocket) continue;
-			if (user.socket == INVALID_SOCKET) continue;
-			send(user.socket, id_client + ":");
-			send(user.socket, (char*)&msg_size, sizeof(int), NULL); // Отправка размера сообщения
-			send(user.socket, msg, msg_size, NULL); // Отправка сообщения
+			if (user.socket != clientsocket && user.socket != INVALID_SOCKET) {
+				send(user.socket, enc_msg_for_others);
+			}
 		}
+		// Рассылка сообщения всем остальным пользователям
 		mtx.unlock();
-		delete[] msg;
 	}
 }
 
@@ -232,4 +271,45 @@ int main() {
 	WSACleanup();
 
 	return 0;
+}
+
+
+static vector<uint64_t> Encrypting_Message(string msg) {
+	vector<uint64_t> encrypt_msg;
+
+	int sum = 0;
+	for (char c : msg) {
+		if (c == ' ') sum++;
+	}
+	sum = (sum == 0) ? 1 : sum;
+
+
+	encrypt_msg.push_back(power(static_cast<uint64_t>(sum), e, n));
+	for (unsigned char c : msg) {
+		encrypt_msg.push_back(encrypt(c, sum));
+	}
+	return encrypt_msg;
+}
+
+static string Decrypting_Message(const vector<uint64_t>& enc_msg) {
+	string dec_msg;
+	if (enc_msg.size() < 1) {
+		return "";
+	}
+	uint64_t val = power(enc_msg[0], d, n);
+	int offset = static_cast<int>(val);
+
+	for (size_t i = 1; i < enc_msg.size(); ++i) {
+		dec_msg += static_cast<char>(decrypt(enc_msg[i], offset));
+	}
+	return dec_msg;
+}
+
+static char decrypt(uint64_t x, int volume) {
+	uint64_t res = power(x, d, n);
+	return static_cast<unsigned char>(res - volume);
+}
+
+static uint64_t encrypt(unsigned char x, int volume) {
+	return power(static_cast<uint64_t>(x) + volume, e, n);
 }
