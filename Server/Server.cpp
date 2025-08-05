@@ -7,6 +7,7 @@
 #include <mutex>
 #include <cstring>
 #include <sstream>
+#include <windows.h>
 #pragma warning(disable:4996)
 
 using namespace std;
@@ -145,7 +146,10 @@ void KickUser(int id) {
 		}
 	}
 	mtx.unlock();
+	MessageBeep(MB_ICONERROR);
 	cout << "User with id " << id << " not found." << endl;
+
+
 }
 
 // Функция-обработчик для каждого клиента (работает в отдельном потоке)
@@ -160,11 +164,13 @@ void ClientHandler(SOCKET clientsocket) {
 	// Аутентификация пользователя
 	if (!RecvPassword(clientsocket)) {
 		cout << "Authentication failed for " << id_client << ". Closing connection." << endl;
+		MessageBeep(MB_ICONERROR);
 		closesocket(clientsocket);
 		return;
 	}
 
 	cout << "User " << id_client << " successfully authenticated." << endl;
+	MessageBeep(MB_OK);
 
 	// Добавляем пользователя в общий список
 	mtx.lock();
@@ -177,6 +183,7 @@ void ClientHandler(SOCKET clientsocket) {
 		vector<uint64_t> enc_msg_vec = recv(clientsocket);
 		if (enc_msg_vec.empty()) {
 			cout << "User " << id_client << " disconected or error." << endl;
+			MessageBeep(MB_ICONERROR);
 			mtx.lock();
 			for (auto it = Users_Connected.begin(); it != Users_Connected.end(); ++it) {
 				if (it->socket == clientsocket) {
@@ -207,12 +214,16 @@ void ClientHandler(SOCKET clientsocket) {
 
 // Главная функция: инициализация сервера, приём подключений и запуск потоков
 int main() {
+
+
+
 	WSAData wsadata;
 	WORD WinSockVer = MAKEWORD(2, 2);
 
 	// Инициализация WinSock
 	if (WSAStartup(WinSockVer, &wsadata) != 0) {
 		cout << "Error" << endl;
+		MessageBeep(MB_ICONERROR);
 		exit(1);
 	}
 
@@ -225,10 +236,14 @@ int main() {
 
 	// Создание и запуск серверного сокета
 	SOCKET slisten = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-	if (bind(slisten, (SOCKADDR*)&addr, sizeof(addr)) == SOCKET_ERROR)
+	if (bind(slisten, (SOCKADDR*)&addr, sizeof(addr)) == SOCKET_ERROR) {
 		cout << "Bind ERROR." << endl;
-	if (listen(slisten, SOMAXCONN) == SOCKET_ERROR)
+		MessageBeep(MB_ICONERROR);
+	}
+	if (listen(slisten, SOMAXCONN) == SOCKET_ERROR) {
 		cout << "Listen ERROR." << endl;
+		MessageBeep(MB_ICONERROR);
+	}
 	cout << "Server start listen client..." << endl;
 
 	SOCKET newconnection;
@@ -248,6 +263,7 @@ int main() {
 			}
 			else {
 				cout << "Unknown command. Use /kick <id> to kick a user." << endl;
+				MessageBeep(MB_ICONERROR);
 			}
 		}
 		}).detach();
@@ -256,10 +272,13 @@ int main() {
 	while (true) {
 		newconnection = accept(slisten, (SOCKADDR*)&addr, &size_of_len);
 
-		if (newconnection == INVALID_SOCKET)
+		if (newconnection == INVALID_SOCKET) {
 			cout << "User is not connected." << endl;
+			MessageBeep(MB_ICONERROR);
+		}
 		else {
 			cout << "New User attempting to connect." << endl;
+			MessageBeep(MB_OK);
 			client_threads.emplace_back(ClientHandler, newconnection);
 			client_threads.back().detach();
 		}
